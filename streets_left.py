@@ -44,6 +44,7 @@ EXCLUDED_HIGHWAYS = {
     "raceway",
     "platform",
 }
+EXCLUDED_NAME_PARTS = ("проезд", "переулок")
 
 
 LatLon = tuple[float, float]
@@ -406,7 +407,13 @@ def osm_segments(data: dict, area: Area) -> Iterator[StreetSegment]:
         name = " ".join(str(tags.get("name", "")).split())
         highway = str(tags.get("highway", ""))
         access = str(tags.get("access", ""))
-        if not name or highway in EXCLUDED_HIGHWAYS or access in {"private", "no"}:
+        excluded_name = any(part in name.casefold() for part in EXCLUDED_NAME_PARTS)
+        if (
+            not name
+            or excluded_name
+            or highway in EXCLUDED_HIGHWAYS
+            or access in {"private", "no"}
+        ):
             continue
         geometry: list[LatLon] = []
         for node in element.get("geometry", []):
@@ -800,14 +807,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     results, features = analyze(
         segments, projection, index, args.sample_step, args.tolerance, threshold
     )
+    incomplete = [result for result in results if result.completion < threshold]
     write_report(args.output / "streets.csv", results, threshold)
+    write_report(args.output / "streets_left.csv", incomplete, threshold)
     write_geojson(args.output / "coverage.geojson", features)
     write_map(
         args.output / "map.html", features, tracks, projection, bbox, results, threshold,
         area.geojson,
     )
 
-    incomplete = [result for result in results if result.completion < threshold]
     total_length = sum(result.total_m for result in results)
     walked_length = sum(result.walked_m for result in results)
     print(
@@ -817,6 +825,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if total_length:
         print(f"Estimated network coverage: {walked_length / total_length * 100:.1f}%")
     print(f"Report: {args.output / 'streets.csv'}")
+    print(f"Left:   {args.output / 'streets_left.csv'}")
     print(f"Map:    {args.output / 'map.html'}")
     return 0
 

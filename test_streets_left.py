@@ -102,6 +102,22 @@ class StreetsLeftTests(unittest.TestCase):
                         {"lat": 59.94, "lon": 30.31},
                     ],
                 },
+                {
+                    "type": "way",
+                    "tags": {"name": "Тестовый Проезд", "highway": "residential"},
+                    "geometry": [
+                        {"lat": 59.95, "lon": 30.30},
+                        {"lat": 59.95, "lon": 30.31},
+                    ],
+                },
+                {
+                    "type": "way",
+                    "tags": {"name": "Тестовый переулок", "highway": "residential"},
+                    "geometry": [
+                        {"lat": 59.96, "lon": 30.30},
+                        {"lat": 59.96, "lon": 30.31},
+                    ],
+                },
             ]
         }
         segments = list(app.osm_segments(osm, app.rectangular_area(bbox)))
@@ -189,10 +205,13 @@ class StreetsLeftTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertTrue((output / "map.html").is_file())
             self.assertTrue((output / "coverage.geojson").is_file())
+            self.assertTrue((output / "streets_left.csv").is_file())
             with (output / "streets.csv").open(encoding="utf-8-sig") as source:
                 rows = list(csv.DictReader(source))
             self.assertEqual(rows[0]["street"], "Example Street")
             self.assertEqual(rows[0]["status"], "complete")
+            with (output / "streets_left.csv").open(encoding="utf-8-sig") as source:
+                self.assertEqual(list(csv.DictReader(source)), [])
 
 
 if __name__ == "__main__":

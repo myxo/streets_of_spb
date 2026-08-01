@@ -4,6 +4,7 @@
 streets from OpenStreetMap. It produces:
 
 - `output/streets.csv` — every street, its estimated completion, and metres left;
+- `output/streets_left.csv` — only streets below the completion threshold;
 - `output/map.html` — an interactive red/yellow/green coverage map;
 - `output/coverage.geojson` — the raw coverage layer for QGIS or another map app.
 
@@ -52,7 +53,8 @@ The program samples every named, publicly accessible OSM road and checks whether
 a GPX line passes within 25 metres. It deliberately ignores motorways, private
 roads, construction, and unnamed paths. A street is considered complete at 30%
 coverage; these defaults accommodate ordinary phone GPS error and gaps at
-intersections.
+intersections. Names containing `проезд` or `переулок` are excluded from the
+analysis, map, reports, and statistics.
 
 Useful adjustments:
 
