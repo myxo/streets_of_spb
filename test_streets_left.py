@@ -8,6 +8,30 @@ import streets_left as app
 
 
 class StreetsLeftTests(unittest.TestCase):
+    def test_project_center_covers_selected_islands_and_excludes_vyborg_side(self):
+        with Path("center.geojson").open(encoding="utf-8") as source:
+            area = app.area_from_geojson(json.load(source))
+        self.assertEqual(len(area.polygons), 1)
+        for point in (
+            (59.94, 30.25),   # Vasilyevsky
+            (59.97, 30.25),   # Krestovsky
+            (59.978, 30.29),  # Kamenny
+            (59.96, 30.31),   # Petrogradsky
+            (59.973, 30.32),  # Aptekarsky
+            (59.98, 30.255),  # Yelagin
+            (59.92, 30.389),  # Monastyrsky
+            (59.96, 30.25),   # Petrovsky, enclosed by the hull
+            (59.93, 30.35),   # mainland centre
+        ):
+            self.assertTrue(area.contains(point), point)
+
+        for point in (
+            (59.96, 30.35),
+            (59.97, 30.35),
+            (59.93, 30.399),  # Malookhtinskaya Embankment, east bank
+        ):
+            self.assertFalse(area.contains(point), point)
+
     def test_gpx_parser_accepts_namespaced_track(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "walk.gpx"
@@ -29,12 +53,27 @@ class StreetsLeftTests(unittest.TestCase):
         self.assertTrue(index.is_near((50, 24), 25))
         self.assertFalse(index.is_near((50, 26), 25))
 
-    def test_bbox_is_split_into_four_exact_tiles(self):
-        tiles = app.split_bbox((0, 10, 2, 14))
+    def test_bbox_can_be_split_into_four_exact_tiles(self):
+        tiles = app.split_bbox((0, 10, 2, 14), rows=2, columns=2)
         self.assertEqual(
             tiles,
             [(0, 10, 1, 12), (0, 12, 1, 14), (1, 10, 2, 12), (1, 12, 2, 14)],
         )
+
+    def test_geojson_area_includes_outer_ring_but_excludes_hole(self):
+        area = app.area_from_geojson(
+            {
+                "type": "Polygon",
+                "coordinates": [
+                    [[30, 59], [31, 59], [31, 60], [30, 60], [30, 59]],
+                    [[30.4, 59.4], [30.6, 59.4], [30.6, 59.6], [30.4, 59.6], [30.4, 59.4]],
+                ],
+            }
+        )
+        self.assertTrue(area.contains((59.2, 30.2)))
+        self.assertFalse(area.contains((59.5, 30.5)))
+        self.assertFalse(area.contains((61, 32)))
+        self.assertEqual(area.bbox, (59, 30, 60, 31))
 
     def test_osm_filtering_and_coverage(self):
         bbox = (59.90, 30.20, 60.00, 30.40)
@@ -58,7 +97,7 @@ class StreetsLeftTests(unittest.TestCase):
                 },
             ]
         }
-        segments = list(app.osm_segments(osm, bbox))
+        segments = list(app.osm_segments(osm, app.rectangular_area(bbox)))
         self.assertEqual(len(segments), 1)
 
         projection = app.Projection(59.95, 30.30)
@@ -68,6 +107,11 @@ class StreetsLeftTests(unittest.TestCase):
         self.assertEqual(results[0].name, "Тестовая улица")
         self.assertAlmostEqual(results[0].completion, 1.0)
         self.assertEqual(features[0]["properties"]["status"], "walked")
+
+    def test_osm_tile_merge_deduplicates_ways(self):
+        way = {"type": "way", "id": 7, "tags": {"name": "A"}}
+        merged = app.merge_osm_data([{"elements": [way]}, {"elements": [way]}])
+        self.assertEqual(merged["elements"], [way])
 
     def test_end_to_end_writes_reports(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -26,8 +26,11 @@ from typing import Iterable, Iterator, Sequence
 
 
 DEFAULT_BBOX = (59.90, 30.18, 60.00, 30.40)
-DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-FALLBACK_OVERPASS_URLS = ("https://overpass.kumi.systems/api/interpreter",)
+DEFAULT_OVERPASS_URL = "https://overpass.private.coffee/api/interpreter"
+FALLBACK_OVERPASS_URLS = (
+    "https://overpass-api.de/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+)
 EARTH_RADIUS_M = 6_371_008.8
 
 # These do not represent streets that can normally be completed on foot.
@@ -81,6 +84,32 @@ class StreetSegment:
     end: LatLon
 
 
+@dataclass(frozen=True)
+class Area:
+    """A collection of GeoJSON polygons in (latitude, longitude) form."""
+
+    polygons: list[list[list[LatLon]]]
+    geojson: dict
+
+    def contains(self, point: LatLon) -> bool:
+        for polygon in self.polygons:
+            if not polygon or not point_in_ring(point, polygon[0]):
+                continue
+            if not any(point_in_ring(point, hole) for hole in polygon[1:]):
+                return True
+        return False
+
+    @property
+    def bbox(self) -> tuple[float, float, float, float]:
+        points = [point for polygon in self.polygons for ring in polygon for point in ring]
+        return (
+            min(point[0] for point in points),
+            min(point[1] for point in points),
+            max(point[0] for point in points),
+            max(point[1] for point in points),
+        )
+
+
 class SegmentIndex:
     """Small spatial grid used for point-to-GPX-segment distance queries."""
 
@@ -129,6 +158,74 @@ def point_segment_distance_sq(point: XY, start: XY, end: XY) -> float:
 
 def distance(start: XY, end: XY) -> float:
     return math.hypot(end[0] - start[0], end[1] - start[1])
+
+
+def point_in_ring(point: LatLon, ring: Sequence[LatLon]) -> bool:
+    """Ray-casting point-in-polygon test, with boundary points included."""
+    if len(ring) < 3:
+        return False
+    y, x = point
+    inside = False
+    previous_y, previous_x = ring[-1]
+    for current_y, current_x in ring:
+        # First handle points exactly on an edge (within floating-point noise).
+        cross = ((x - previous_x) * (current_y - previous_y)
+                 - (y - previous_y) * (current_x - previous_x))
+        if abs(cross) < 1e-12 and (
+            min(previous_x, current_x) - 1e-12 <= x <= max(previous_x, current_x) + 1e-12
+            and min(previous_y, current_y) - 1e-12 <= y <= max(previous_y, current_y) + 1e-12
+        ):
+            return True
+        if (current_y > y) != (previous_y > y):
+            crossing_x = previous_x + (
+                (current_x - previous_x) * (y - previous_y) / (current_y - previous_y)
+            )
+            if x < crossing_x:
+                inside = not inside
+        previous_y, previous_x = current_y, current_x
+    return inside
+
+
+def _geometry_polygons(geometry: dict) -> Iterator[list[list[LatLon]]]:
+    geometry_type = geometry.get("type")
+    coordinates = geometry.get("coordinates", [])
+    raw_polygons = [coordinates] if geometry_type == "Polygon" else coordinates
+    if geometry_type not in {"Polygon", "MultiPolygon"}:
+        return
+    for raw_polygon in raw_polygons:
+        polygon: list[list[LatLon]] = []
+        for raw_ring in raw_polygon:
+            ring: list[LatLon] = []
+            for coordinate in raw_ring:
+                try:
+                    ring.append((float(coordinate[1]), float(coordinate[0])))
+                except (IndexError, TypeError, ValueError):
+                    continue
+            if len(ring) >= 3:
+                polygon.append(ring)
+        if polygon:
+            yield polygon
+
+
+def area_from_geojson(data: dict) -> Area:
+    polygons: list[list[list[LatLon]]] = []
+    data_type = data.get("type")
+    if data_type == "FeatureCollection":
+        for feature in data.get("features", []):
+            polygons.extend(_geometry_polygons(feature.get("geometry", {})))
+    elif data_type == "Feature":
+        polygons.extend(_geometry_polygons(data.get("geometry", {})))
+    else:
+        polygons.extend(_geometry_polygons(data))
+    if not polygons:
+        raise ValueError("GeoJSON contains no Polygon or MultiPolygon geometry")
+    return Area(polygons, data)
+
+
+def rectangular_area(bbox: tuple[float, float, float, float]) -> Area:
+    south, west, north, east = bbox
+    coordinates = [[[west, south], [east, south], [east, north], [west, north], [west, south]]]
+    return area_from_geojson({"type": "Polygon", "coordinates": coordinates})
 
 
 def local_name(tag: str) -> str:
@@ -235,7 +332,7 @@ def fetch_overpass_tile(
             with urllib.request.urlopen(request, timeout=210) as response:
                 payload = response.read()
             break
-        except (urllib.error.URLError, TimeoutError) as error:
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
             last_error = error
             print(f"Warning: Overpass request failed at {endpoint}: {error}", file=sys.stderr)
     if payload is None:
@@ -255,7 +352,7 @@ def fetch_overpass_tile(
 
 
 def split_bbox(
-    bbox: tuple[float, float, float, float], rows: int = 2, columns: int = 2
+    bbox: tuple[float, float, float, float], rows: int = 3, columns: int = 3
 ) -> list[tuple[float, float, float, float]]:
     south, west, north, east = bbox
     latitude_step = (north - south) / rows
@@ -278,7 +375,7 @@ def fetch_osm(
     endpoint: str,
     refresh: bool,
 ) -> dict:
-    """Download a 2x2 tile set and deduplicate ways crossing tile edges."""
+    """Download a small tile set and deduplicate ways crossing tile edges."""
     endpoints = (endpoint,) if endpoint != DEFAULT_OVERPASS_URL else (
         DEFAULT_OVERPASS_URL,
         *FALLBACK_OVERPASS_URLS,
@@ -301,9 +398,7 @@ def in_bbox(point: LatLon, bbox: tuple[float, float, float, float]) -> bool:
     return bbox[0] <= point[0] <= bbox[2] and bbox[1] <= point[1] <= bbox[3]
 
 
-def osm_segments(
-    data: dict, bbox: tuple[float, float, float, float]
-) -> Iterator[StreetSegment]:
+def osm_segments(data: dict, area: Area) -> Iterator[StreetSegment]:
     for element in data.get("elements", []):
         if element.get("type") != "way":
             continue
@@ -320,11 +415,29 @@ def osm_segments(
             except (KeyError, TypeError, ValueError):
                 continue
         for start, end in zip(geometry, geometry[1:]):
-            # Overpass returns the entire way when any part intersects the box.
-            # Retaining segments whose endpoints straddle the box is a simple,
-            # useful approximation at the boundary.
-            if in_bbox(start, bbox) or in_bbox(end, bbox):
+            # Several points catch ordinary bridge/canal crossings while still
+            # preventing complete ways from leaking outside the polygon.
+            checkpoints = (
+                start,
+                end,
+                ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2),
+            )
+            if any(area.contains(point) for point in checkpoints):
                 yield StreetSegment(name, highway, start, end)
+
+
+def merge_osm_data(items: Iterable[dict]) -> dict:
+    elements_by_id: dict[tuple[str, int], dict] = {}
+    anonymous: list[dict] = []
+    for data in items:
+        for element in data.get("elements", []):
+            try:
+                key = (str(element["type"]), int(element["id"]))
+            except (KeyError, TypeError, ValueError):
+                anonymous.append(element)
+                continue
+            elements_by_id[key] = element
+    return {"elements": [*elements_by_id.values(), *anonymous]}
 
 
 def sampled_coverage(
@@ -466,6 +579,7 @@ def write_map(
     bbox: tuple[float, float, float, float],
     results: Sequence[StreetResult],
     complete_at: float,
+    area_geojson: dict,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     track_coordinates = [
@@ -482,6 +596,9 @@ def write_map(
         {"type": "MultiLineString", "coordinates": track_coordinates},
         separators=(",", ":"),
     )
+    area_data = json.dumps(
+        area_geojson, ensure_ascii=False, separators=(",", ":")
+    ).replace("<", "\\u003c")
     incomplete = sum(result.completion < complete_at for result in results)
     escaped_title = html.escape(f"Streets left: {incomplete} of {len(results)}")
     south, west, north, east = bbox
@@ -505,6 +622,7 @@ def write_map(
 <script>
 const coverage = {map_data};
 const tracks = {tracks_data};
+const centerArea = {area_data};
 const map = L.map('map', {{preferCanvas:true}});
 L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
   maxZoom: 19,
@@ -519,6 +637,8 @@ L.geoJSON(coverage, {{
   )
 }}).addTo(map);
 L.geoJSON(tracks, {{style:{{color:'#1769aa', weight:2, opacity:.35}}}}).addTo(map);
+L.geoJSON(centerArea, {{style:{{color:'#6f42c1', weight:2, opacity:.9,
+  fillOpacity:.03, dashArray:'6 5'}}}}).addTo(map);
 map.fitBounds([[{south}, {west}], [{north}, {east}]]);
 const summary = L.control({{position:'topright'}});
 summary.onAdd = () => {{
@@ -546,9 +666,15 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--bbox",
         type=parse_bbox,
-        default=DEFAULT_BBOX,
+        default=None,
         metavar="S,W,N,E",
-        help="analysis boundary (default: %(default)s)",
+        help="rectangular boundary; overrides --area",
+    )
+    parser.add_argument(
+        "--area",
+        type=Path,
+        default=Path("center.geojson"),
+        help="GeoJSON Polygon/MultiPolygon boundary (default: %(default)s)",
     )
     parser.add_argument("--output", type=Path, default=Path("output"), help="output directory")
     parser.add_argument("--cache", type=Path, default=Path(".cache"), help="OSM cache directory")
@@ -569,7 +695,12 @@ def make_parser() -> argparse.ArgumentParser:
         metavar="PERCENT",
         help="street completion threshold",
     )
-    parser.add_argument("--osm-file", type=Path, help="use an Overpass JSON file instead of downloading")
+    parser.add_argument(
+        "--osm-file",
+        type=Path,
+        action="append",
+        help="use an Overpass JSON file instead of downloading; may be repeated",
+    )
     parser.add_argument("--overpass-url", default=DEFAULT_OVERPASS_URL, help=argparse.SUPPRESS)
     return parser
 
@@ -581,15 +712,26 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         parser.error("distance options must be greater than zero")
     if not 0 < args.complete_at <= 100:
         parser.error("--complete-at must be between 0 and 100")
-    if args.osm_file and not args.osm_file.is_file():
-        parser.error(f"OSM file does not exist: {args.osm_file}")
+    for osm_file in args.osm_file or []:
+        if not osm_file.is_file():
+            parser.error(f"OSM file does not exist: {osm_file}")
+    if not args.bbox and not args.area.is_file():
+        parser.error(f"area file does not exist: {args.area}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = make_parser()
     args = parser.parse_args(argv)
     validate_args(parser, args)
-    bbox = args.bbox
+    try:
+        if args.bbox:
+            area = rectangular_area(args.bbox)
+        else:
+            with args.area.open(encoding="utf-8") as source:
+                area = area_from_geojson(json.load(source))
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        parser.error(f"could not read analysis area: {error}")
+    bbox = area.bbox
     projection = Projection((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
 
     tracks, warnings = load_tracks(args.tracks)
@@ -603,8 +745,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.osm_file:
-            with args.osm_file.open(encoding="utf-8") as source:
-                osm_data = json.load(source)
+            osm_items = []
+            for osm_file in args.osm_file:
+                with osm_file.open(encoding="utf-8") as source:
+                    osm_items.append(json.load(source))
+            osm_data = merge_osm_data(osm_items)
         else:
             print("Loading named streets from OpenStreetMap (the first run can take a minute)...")
             osm_data = fetch_osm(bbox, args.cache, args.overpass_url, args.refresh)
@@ -612,7 +757,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Error: {error}", file=sys.stderr)
         return 1
 
-    segments = list(osm_segments(osm_data, bbox))
+    segments = list(osm_segments(osm_data, area))
     if not segments:
         print("Error: OpenStreetMap response contains no usable named streets", file=sys.stderr)
         return 1
@@ -623,7 +768,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     write_report(args.output / "streets.csv", results, threshold)
     write_geojson(args.output / "coverage.geojson", features)
     write_map(
-        args.output / "map.html", features, tracks, projection, bbox, results, threshold
+        args.output / "map.html", features, tracks, projection, bbox, results, threshold,
+        area.geojson,
     )
 
     incomplete = [result for result in results if result.completion < threshold]

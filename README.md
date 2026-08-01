@@ -25,16 +25,24 @@ map edits with:
 python3 streets_left.py --refresh
 ```
 
-The default boundary is `59.90,30.18,60.00,30.40`, chosen to include the area
-covered by the GPX files currently in this project. Set the exact area that you
-mean by “centre” with `SOUTH,WEST,NORTH,EAST`, for example:
+The default boundary is the checked-in [`center.geojson`](center.geojson). It is
+built from a convex hull around Vasilyevsky, Krestovsky, Kamenny, Petrogradsky,
+Aptekarsky, Yelagin, and Monastyrsky islands plus the main historic centre down
+to the Obvodny Canal. Petrovsky Island and the gaps between these areas are
+therefore inside the polygon as well. The hull is clipped along the Neva and
+Bolshaya Nevka to exclude Vyborgskaya Storona and the east-bank
+Krasnogvardeysky/Malaya Okhta area. The purple dashed line on the map shows this
+project boundary. Its source points are based on OpenStreetMap geometry.
+
+To experiment with a rectangular area instead, pass `SOUTH,WEST,NORTH,EAST`:
 
 ```sh
 python3 streets_left.py --bbox 59.90,30.24,59.97,30.39
 ```
 
-This is important: changing the box changes both the street list and the
-completion percentage.
+`--bbox` overrides the GeoJSON area. You can also supply a different polygon or
+multipolygon with `--area my-area.geojson`. Changing the area changes both the
+street list and the completion percentage.
 
 ## How matching works
 
