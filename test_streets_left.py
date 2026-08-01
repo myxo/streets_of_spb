@@ -212,6 +212,15 @@ class StreetsLeftTests(unittest.TestCase):
             self.assertEqual(rows[0]["status"], "complete")
             with (output / "streets_left.csv").open(encoding="utf-8-sig") as source:
                 self.assertEqual(list(csv.DictReader(source)), [])
+            map_html = (output / "map.html").read_text(encoding="utf-8")
+            self.assertIn("const statisticsLayer = L.layerGroup", map_html)
+            self.assertIn("Show tracks", map_html)
+            self.assertIn("Show statistics", map_html)
+            self.assertNotIn("Hide statistics", map_html)
+            self.assertIn("map.removeLayer(tracksLayer)", map_html)
+            self.assertIn("tracksLayer.addTo(map)", map_html)
+            self.assertIn("map.createPane('tracksPane')", map_html)
+            self.assertIn("color:'#0066ff', weight:5, opacity:1", map_html)
 
 
 if __name__ == "__main__":

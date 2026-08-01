@@ -646,6 +646,9 @@ def write_map(
     .summary {{ background: white; padding: 8px 12px; border-radius: 4px;
       box-shadow: 0 1px 5px #777; font: 14px/1.4 system-ui, sans-serif; }}
     .legend i {{ display:inline-block; width:12px; height:4px; margin:0 6px 3px 0; }}
+    .map-button {{ background:white; border:0; border-radius:4px; padding:8px 12px;
+      box-shadow:0 1px 5px #777; cursor:pointer; font:14px/1.2 system-ui,sans-serif; }}
+    .map-button:hover {{ background:#f4f4f4; }}
   </style>
 </head>
 <body>
@@ -656,6 +659,9 @@ const coverage = {map_data};
 const tracks = {tracks_data};
 const centerArea = {area_data};
 const map = L.map('map', {{preferCanvas:true}});
+map.createPane('tracksPane');
+map.getPane('tracksPane').style.zIndex = 650;
+map.getPane('tracksPane').style.pointerEvents = 'none';
 L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
   maxZoom: 19,
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -670,17 +676,26 @@ const stateLabels = {{
   remaining_complete:'Not walked; street passed the completion threshold',
   remaining_incomplete:'Not walked; street has not passed the completion threshold'
 }};
-L.geoJSON(coverage, {{
+const coverageLayer = L.geoJSON(coverage, {{
   style: feature => ({{color:colors[feature.properties.status], weight:4, opacity:.85}}),
   onEachFeature: (feature, layer) => layer.bindPopup(
     '<b>' + feature.properties.name + '</b><br>' +
     feature.properties.completion + '% of the street<br>' +
     stateLabels[feature.properties.status]
   )
-}}).addTo(map);
-L.geoJSON(tracks, {{style:{{color:'#1769aa', weight:2, opacity:.35}}}}).addTo(map);
-L.geoJSON(centerArea, {{style:{{color:'#6f42c1', weight:2, opacity:.9,
-  fillOpacity:.03, dashArray:'6 5'}}}}).addTo(map);
+}});
+const trackOutlineLayer = L.geoJSON(tracks, {{
+  pane:'tracksPane', interactive:false,
+  style:{{color:'#ffffff', weight:8, opacity:.9}}
+}});
+const trackColorLayer = L.geoJSON(tracks, {{
+  pane:'tracksPane', interactive:false,
+  style:{{color:'#0066ff', weight:5, opacity:1}}
+}});
+const tracksLayer = L.layerGroup([trackOutlineLayer, trackColorLayer]);
+const boundaryLayer = L.geoJSON(centerArea, {{style:{{color:'#6f42c1', weight:2,
+  opacity:.9, fillOpacity:.03, dashArray:'6 5'}}}});
+const statisticsLayer = L.layerGroup([coverageLayer, boundaryLayer]).addTo(map);
 map.fitBounds([[{south}, {west}], [{north}, {east}]]);
 const summary = L.control({{position:'topright'}});
 summary.onAdd = () => {{
@@ -688,11 +703,32 @@ summary.onAdd = () => {{
   div.innerHTML = '<b>{escaped_title}</b><br>' +
     '<i style="background:#16803a"></i>walked part<br>' +
     '<i style="background:#e69f00"></i>not walked; street passed<br>' +
-    '<i style="background:#d62728"></i>not walked; street did not pass<br>' +
-    '<i style="background:#1769aa"></i>your GPS tracks';
+    '<i style="background:#d62728"></i>not walked; street did not pass';
   return div;
 }};
 summary.addTo(map);
+const statisticsToggle = L.control({{position:'topleft'}});
+statisticsToggle.onAdd = () => {{
+  const button = L.DomUtil.create('button', 'map-button');
+  button.type = 'button';
+  button.textContent = 'Show tracks';
+  L.DomEvent.disableClickPropagation(button);
+  L.DomEvent.on(button, 'click', () => {{
+    if (map.hasLayer(statisticsLayer)) {{
+      map.removeLayer(statisticsLayer);
+      summary.remove();
+      tracksLayer.addTo(map);
+      button.textContent = 'Show statistics';
+    }} else {{
+      map.removeLayer(tracksLayer);
+      statisticsLayer.addTo(map);
+      summary.addTo(map);
+      button.textContent = 'Show tracks';
+    }}
+  }});
+  return button;
+}};
+statisticsToggle.addTo(map);
 </script>
 </body>
 </html>

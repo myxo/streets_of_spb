@@ -76,7 +76,9 @@ The colored map is intended for visually checking those cases.
 Map colors are applied to approximately 12-metre street parts: green means that
 part was matched to a GPS track; yellow means it was not walked but its street
 passed the completion threshold; red means it was not walked and its street has
-not passed the threshold.
+not passed the threshold. The map shows either statistics or tracks, never both:
+use **Show tracks** and **Show statistics** to switch views. GPS tracks are drawn
+as opaque bright-blue lines with a white outline for visibility.
 
 ## Tests
 
