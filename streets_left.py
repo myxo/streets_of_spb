@@ -446,20 +446,20 @@ def sampled_coverage(
     index: SegmentIndex,
     sample_step_m: float,
     tolerance_m: float,
-) -> tuple[float, int, int]:
+) -> tuple[float, list[bool]]:
     start = projection.xy(segment.start)
     end = projection.xy(segment.end)
     length_m = distance(start, end)
     sample_count = max(1, math.ceil(length_m / sample_step_m))
-    covered = 0
+    samples: list[bool] = []
     for number in range(sample_count):
         fraction = (number + 0.5) / sample_count
         point = (
             start[0] + fraction * (end[0] - start[0]),
             start[1] + fraction * (end[1] - start[1]),
         )
-        covered += index.is_near(point, tolerance_m)
-    return length_m, covered, sample_count
+        samples.append(index.is_near(point, tolerance_m))
+    return length_m, samples
 
 
 def normalize_name(name: str) -> str:
@@ -473,39 +473,64 @@ def analyze(
     index: SegmentIndex,
     sample_step_m: float,
     tolerance_m: float,
+    complete_at: float,
 ) -> tuple[list[StreetResult], list[dict]]:
     grouped: dict[str, StreetResult] = {}
-    features: list[dict] = []
+    sampled_segments: list[tuple[StreetSegment, list[bool]]] = []
     for segment in segments:
-        length_m, covered, samples = sampled_coverage(
+        length_m, samples = sampled_coverage(
             segment, projection, index, sample_step_m, tolerance_m
         )
+        covered = sum(samples)
         key = normalize_name(segment.name)
         result = grouped.setdefault(key, StreetResult(segment.name))
         result.total_m += length_m
-        result.walked_m += length_m * covered / samples
-        segment_completion = covered / samples
-        features.append(
-            {
-                "type": "Feature",
-                "properties": {
-                    "name": segment.name,
-                    "highway": segment.highway,
-                    "completion": round(segment_completion * 100, 1),
-                    "status": (
-                        "walked" if covered == samples else
-                        "unwalked" if covered == 0 else "partial"
-                    ),
-                },
-                "geometry": {
-                    "type": "LineString",
-                    "coordinates": [
-                        [segment.start[1], segment.start[0]],
-                        [segment.end[1], segment.end[0]],
-                    ],
-                },
-            }
-        )
+        result.walked_m += length_m * covered / len(samples)
+        sampled_segments.append((segment, samples))
+
+    # Build map lines only after whole-street completion is known. Each
+    # contiguous run of samples gets its own colorable feature.
+    features: list[dict] = []
+    for segment, samples in sampled_segments:
+        result = grouped[normalize_name(segment.name)]
+        street_passed = result.completion >= complete_at
+        first = 0
+        while first < len(samples):
+            walked = samples[first]
+            last = first + 1
+            while last < len(samples) and samples[last] == walked:
+                last += 1
+            start_fraction = first / len(samples)
+            end_fraction = last / len(samples)
+            start = (
+                segment.start[0] + start_fraction * (segment.end[0] - segment.start[0]),
+                segment.start[1] + start_fraction * (segment.end[1] - segment.start[1]),
+            )
+            end = (
+                segment.start[0] + end_fraction * (segment.end[0] - segment.start[0]),
+                segment.start[1] + end_fraction * (segment.end[1] - segment.start[1]),
+            )
+            feature_status = (
+                "walked" if walked else
+                "remaining_complete" if street_passed else
+                "remaining_incomplete"
+            )
+            features.append(
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "name": segment.name,
+                        "highway": segment.highway,
+                        "completion": round(result.completion * 100, 1),
+                        "status": feature_status,
+                    },
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[start[1], start[0]], [end[1], end[0]]],
+                    },
+                }
+            )
+            first = last
     results = sorted(grouped.values(), key=lambda item: (item.completion, -item.total_m, item.name))
     return results, features
 
@@ -628,12 +653,22 @@ L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
   maxZoom: 19,
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 }}).addTo(map);
-const colors = {{walked:'#16803a', partial:'#e69f00', unwalked:'#d62728'}};
+const colors = {{
+  walked:'#16803a',
+  remaining_complete:'#e69f00',
+  remaining_incomplete:'#d62728'
+}};
+const stateLabels = {{
+  walked:'Walked part',
+  remaining_complete:'Not walked; street passed the completion threshold',
+  remaining_incomplete:'Not walked; street has not passed the completion threshold'
+}};
 L.geoJSON(coverage, {{
   style: feature => ({{color:colors[feature.properties.status], weight:4, opacity:.85}}),
   onEachFeature: (feature, layer) => layer.bindPopup(
     '<b>' + feature.properties.name + '</b><br>' +
-    feature.properties.completion + '% of this section'
+    feature.properties.completion + '% of the street<br>' +
+    stateLabels[feature.properties.status]
   )
 }}).addTo(map);
 L.geoJSON(tracks, {{style:{{color:'#1769aa', weight:2, opacity:.35}}}}).addTo(map);
@@ -644,9 +679,9 @@ const summary = L.control({{position:'topright'}});
 summary.onAdd = () => {{
   const div = L.DomUtil.create('div', 'summary legend');
   div.innerHTML = '<b>{escaped_title}</b><br>' +
-    '<i style="background:#d62728"></i>not walked<br>' +
-    '<i style="background:#e69f00"></i>partly walked<br>' +
-    '<i style="background:#16803a"></i>walked<br>' +
+    '<i style="background:#16803a"></i>walked part<br>' +
+    '<i style="background:#e69f00"></i>not walked; street passed<br>' +
+    '<i style="background:#d62728"></i>not walked; street did not pass<br>' +
     '<i style="background:#1769aa"></i>your GPS tracks';
   return div;
 }};
@@ -691,7 +726,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--complete-at",
         type=float,
-        default=90.0,
+        default=30.0,
         metavar="PERCENT",
         help="street completion threshold",
     )
@@ -761,10 +796,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not segments:
         print("Error: OpenStreetMap response contains no usable named streets", file=sys.stderr)
         return 1
-    results, features = analyze(
-        segments, projection, index, args.sample_step, args.tolerance
-    )
     threshold = args.complete_at / 100
+    results, features = analyze(
+        segments, projection, index, args.sample_step, args.tolerance, threshold
+    )
     write_report(args.output / "streets.csv", results, threshold)
     write_geojson(args.output / "coverage.geojson", features)
     write_map(

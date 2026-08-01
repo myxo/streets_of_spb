@@ -8,6 +8,9 @@ import streets_left as app
 
 
 class StreetsLeftTests(unittest.TestCase):
+    def test_default_completion_threshold_is_thirty_percent(self):
+        self.assertEqual(app.make_parser().parse_args([]).complete_at, 30.0)
+
     def test_project_center_covers_selected_islands_and_excludes_vyborg_side(self):
         with Path("center.geojson").open(encoding="utf-8") as source:
             area = app.area_from_geojson(json.load(source))
@@ -103,10 +106,37 @@ class StreetsLeftTests(unittest.TestCase):
         projection = app.Projection(59.95, 30.30)
         tracks = [[(59.93, 30.30), (59.93, 30.31)]]
         index = app.build_track_index(tracks, projection, 25, 1000)
-        results, features = app.analyze(segments, projection, index, 12, 25)
+        results, features = app.analyze(segments, projection, index, 12, 25, 0.30)
         self.assertEqual(results[0].name, "Тестовая улица")
         self.assertAlmostEqual(results[0].completion, 1.0)
         self.assertEqual(features[0]["properties"]["status"], "walked")
+
+    def test_map_colors_unwalked_parts_by_whole_street_threshold(self):
+        projection = app.Projection(59.93, 30.30)
+        walked = app.StreetSegment(
+            "Passed Street", "residential", (59.93, 30.300), (59.93, 30.301)
+        )
+        remaining = app.StreetSegment(
+            "Passed Street", "residential", (59.93, 30.302), (59.93, 30.303)
+        )
+        failed = app.StreetSegment(
+            "Failed Street", "residential", (59.94, 30.300), (59.94, 30.301)
+        )
+        index = app.build_track_index(
+            [[walked.start, walked.end]], projection, tolerance_m=10, max_gap_m=1000
+        )
+        _results, features = app.analyze(
+            [walked, remaining, failed], projection, index, 12, 10, 0.30
+        )
+        statuses = {}
+        for feature in features:
+            statuses.setdefault(feature["properties"]["name"], set()).add(
+                feature["properties"]["status"]
+            )
+        self.assertEqual(
+            statuses["Passed Street"], {"walked", "remaining_complete"}
+        )
+        self.assertEqual(statuses["Failed Street"], {"remaining_incomplete"})
 
     def test_osm_tile_merge_deduplicates_ways(self):
         way = {"type": "way", "id": 7, "tags": {"name": "A"}}

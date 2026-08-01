@@ -48,7 +48,7 @@ street list and the completion percentage.
 
 The program samples every named, publicly accessible OSM road and checks whether
 a GPX line passes within 25 metres. It deliberately ignores motorways, private
-roads, construction, and unnamed paths. A street is considered complete at 90%
+roads, construction, and unnamed paths. A street is considered complete at 30%
 coverage; these defaults accommodate ordinary phone GPS error and gaps at
 intersections.
 
@@ -68,6 +68,11 @@ python3 streets_left.py --help
 The result is an estimate. Parallel streets closer than the tolerance, tunnels,
 bridges, inaccurate GPS points, and incomplete OpenStreetMap data can affect it.
 The colored map is intended for visually checking those cases.
+
+Map colors are applied to approximately 12-metre street parts: green means that
+part was matched to a GPS track; yellow means it was not walked but its street
+passed the completion threshold; red means it was not walked and its street has
+not passed the threshold.
 
 ## Tests
 
