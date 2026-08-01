@@ -31,7 +31,9 @@ Aptekarsky, Yelagin, and Monastyrsky islands plus the main historic centre down
 to the Obvodny Canal. Petrovsky Island and the gaps between these areas are
 therefore inside the polygon as well. The hull is clipped along the Neva and
 Bolshaya Nevka to exclude Vyborgskaya Storona and the east-bank
-Krasnogvardeysky/Malaya Okhta area. The purple dashed line on the map shows this
+Krasnogvardeysky/Malaya Okhta area. The northern edge follows the full
+OpenStreetMap centerline of the Bolshaya Nevka, and the southern edge follows
+the Obvodny Canal centerline. The purple dashed line on the map shows this
 project boundary. Its source points are based on OpenStreetMap geometry.
 
 To experiment with a rectangular area instead, pass `SOUTH,WEST,NORTH,EAST`:

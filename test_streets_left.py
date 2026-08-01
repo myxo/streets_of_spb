@@ -25,6 +25,8 @@ class StreetsLeftTests(unittest.TestCase):
             (59.92, 30.389),  # Monastyrsky
             (59.96, 30.25),   # Petrovsky, enclosed by the hull
             (59.93, 30.35),   # mainland centre
+            (59.916, 30.35),  # north bank of the Obvodny Canal
+            (59.980, 30.30),  # south side of the Bolshaya Nevka
         ):
             self.assertTrue(area.contains(point), point)
 
@@ -32,6 +34,8 @@ class StreetsLeftTests(unittest.TestCase):
             (59.96, 30.35),
             (59.97, 30.35),
             (59.93, 30.399),  # Malookhtinskaya Embankment, east bank
+            (59.914, 30.35),  # south bank of the Obvodny Canal
+            (59.983, 30.30),  # north side of the Bolshaya Nevka
         ):
             self.assertFalse(area.contains(point), point)
 
