@@ -82,6 +82,23 @@ not passed the threshold. The map shows either statistics or tracks, never both:
 use **Show tracks** and **Show statistics** to switch views. GPS tracks are drawn
 as opaque bright-blue lines with a white outline for visibility.
 
+## Publish the map with GitHub Pages
+
+The generated `output/map.html` is committed to the repository and deployed as
+the GitHub Pages home page by `.github/workflows/pages.yml`. After refreshing
+the data, commit the updated map and push it:
+
+```sh
+python3 streets_left.py --refresh
+git add output/map.html
+git commit -m "update street coverage map"
+git push
+```
+
+For the first deployment, open the repository's **Settings → Pages** and set
+**Source** to **GitHub Actions**. The map contains simplified versions of the
+GPS tracks, so publishing it also makes those routes public.
+
 ## Tests
 
 ```sh

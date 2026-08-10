@@ -311,6 +311,12 @@ def fetch_overpass_tile(
     endpoints: Sequence[str],
     refresh: bool,
 ) -> dict:
+    """Fetch one tile, preferring a fallback that succeeds for later calls.
+
+    ``fetch_osm`` passes a list so a working endpoint can be moved to the
+    front.  Other callers may pass any sequence if they do not want that
+    behavior.
+    """
     query = overpass_query(bbox)
     digest = hashlib.sha256(query.encode()).hexdigest()[:16]
     cache_path = cache_dir / f"overpass-{digest}.json"
@@ -319,8 +325,7 @@ def fetch_overpass_tile(
             return json.load(source)
 
     last_error: Exception | None = None
-    payload: bytes | None = None
-    for endpoint in endpoints:
+    for endpoint_index, endpoint in enumerate(tuple(endpoints)):
         request = urllib.request.Request(
             endpoint,
             data=urllib.parse.urlencode({"data": query}).encode(),
@@ -332,24 +337,38 @@ def fetch_overpass_tile(
         try:
             with urllib.request.urlopen(request, timeout=210) as response:
                 payload = response.read()
-            break
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             last_error = error
             print(f"Warning: Overpass request failed at {endpoint}: {error}", file=sys.stderr)
-    if payload is None:
-        if cache_path.exists():
-            print("Warning: using cached map tile instead", file=sys.stderr)
-            with cache_path.open(encoding="utf-8") as source:
-                return json.load(source)
-        raise RuntimeError(f"could not download OpenStreetMap data: {last_error}")
+            continue
 
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError as error:
-        raise RuntimeError("Overpass returned a response that is not JSON") from error
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path.write_bytes(payload)
-    return data
+        try:
+            data = json.loads(payload)
+            if not isinstance(data, dict) or not isinstance(data.get("elements"), list):
+                raise ValueError("response has no elements list")
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            last_error = error
+            print(
+                f"Warning: invalid Overpass response from {endpoint}: {error}",
+                file=sys.stderr,
+            )
+            continue
+
+        # Avoid repeating failed endpoints for every remaining tile. Lists are
+        # used by fetch_osm; accepting other sequences keeps this helper handy
+        # for callers that do not want their endpoint order changed.
+        if isinstance(endpoints, list) and endpoint_index:
+            endpoints.insert(0, endpoints.pop(endpoint_index))
+            print(f"Using fallback Overpass endpoint: {endpoint}")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path.write_bytes(payload)
+        return data
+
+    if cache_path.exists():
+        print("Warning: using cached map tile instead", file=sys.stderr)
+        with cache_path.open(encoding="utf-8") as source:
+            return json.load(source)
+    raise RuntimeError(f"could not download OpenStreetMap data: {last_error}")
 
 
 def split_bbox(
@@ -377,10 +396,10 @@ def fetch_osm(
     refresh: bool,
 ) -> dict:
     """Download a small tile set and deduplicate ways crossing tile edges."""
-    endpoints = (endpoint,) if endpoint != DEFAULT_OVERPASS_URL else (
+    endpoints = [endpoint] if endpoint != DEFAULT_OVERPASS_URL else [
         DEFAULT_OVERPASS_URL,
         *FALLBACK_OVERPASS_URLS,
-    )
+    ]
     elements_by_id: dict[tuple[str, int], dict] = {}
     tiles = split_bbox(bbox)
     for number, tile in enumerate(tiles, 1):

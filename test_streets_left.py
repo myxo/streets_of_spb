@@ -2,7 +2,9 @@ import csv
 import json
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
+from unittest import mock
 
 import streets_left as app
 
@@ -163,6 +165,49 @@ class StreetsLeftTests(unittest.TestCase):
         way = {"type": "way", "id": 7, "tags": {"name": "A"}}
         merged = app.merge_osm_data([{"elements": [way]}, {"elements": [way]}])
         self.assertEqual(merged["elements"], [way])
+
+    def test_overpass_promotes_a_working_fallback_for_later_tiles(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self):
+                return b'{"elements": []}'
+
+        calls = []
+
+        def urlopen(request, timeout):
+            self.assertEqual(timeout, 210)
+            calls.append(request.full_url)
+            if request.full_url == "https://unavailable.example/api":
+                raise urllib.error.URLError("temporarily unavailable")
+            return Response()
+
+        endpoints = [
+            "https://unavailable.example/api",
+            "https://working.example/api",
+        ]
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            app.urllib.request, "urlopen", side_effect=urlopen
+        ):
+            app.fetch_overpass_tile((0, 0, 1, 1), Path(directory), endpoints, True)
+            app.fetch_overpass_tile((1, 1, 2, 2), Path(directory), endpoints, True)
+
+        self.assertEqual(
+            calls,
+            [
+                "https://unavailable.example/api",
+                "https://working.example/api",
+                "https://working.example/api",
+            ],
+        )
+        self.assertEqual(
+            endpoints,
+            ["https://working.example/api", "https://unavailable.example/api"],
+        )
 
     def test_end_to_end_writes_reports(self):
         with tempfile.TemporaryDirectory() as directory:
