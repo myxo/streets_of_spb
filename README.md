@@ -34,8 +34,10 @@ therefore inside the polygon as well. The hull is clipped along the Neva and
 Bolshaya Nevka to exclude Vyborgskaya Storona and the east-bank
 Krasnogvardeysky/Malaya Okhta area. The northern edge follows the full
 OpenStreetMap centerline of the Bolshaya Nevka, and the southern edge follows
-the Obvodny Canal centerline. The purple dashed line on the map shows this
-project boundary. Its source points are based on OpenStreetMap geometry.
+the Obvodny Canal centerline. On the southwest, the edge follows the
+Ekateringofka from its Bolshaya Neva entrance to the Obvodny mouth, excluding
+Gutuevsky Island. The purple dashed line on the map shows this project boundary.
+Its source points are based on OpenStreetMap geometry.
 
 To experiment with a rectangular area instead, pass `SOUTH,WEST,NORTH,EAST`:
 

@@ -36,6 +36,7 @@ class StreetsLeftTests(unittest.TestCase):
             (59.93, 30.399),  # Malookhtinskaya Embankment, east bank
             (59.914, 30.35),  # south bank of the Obvodny Canal
             (59.983, 30.30),  # north side of the Bolshaya Nevka
+            (59.915, 30.255), # Gutuevsky Island, west of the Ekateringofka
         ):
             self.assertFalse(area.contains(point), point)
 

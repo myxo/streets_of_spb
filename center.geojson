@@ -3,7 +3,7 @@
   "name": "Центр Санкт-Петербурга — территория проекта",
   "properties": {
     "name": "Центр Санкт-Петербурга — территория проекта",
-    "method": "convex hull, clipped by OSM boundaries along the Neva, Bolshaya Nevka, and Obvodny Canal centerlines",
+    "method": "convex hull, clipped by OSM boundaries along the Neva, Bolshaya Nevka, Ekateringofka, and Obvodny Canal centerlines",
     "includes": [
       "Васильевский остров",
       "Крестовский остров",
@@ -23,6 +23,7 @@
       "Выборгская сторона",
       "Красногвардейский район east of the Neva",
       "land north of the Bolshaya Nevka",
+      "Гутуевский остров west of the Ekateringofka",
       "land south of the Obvodny Canal"
     ]
   },
@@ -281,6 +282,38 @@
         [
           30.2612253,
           59.9093979
+        ],
+        [
+          30.2599408,
+          59.9093491
+        ],
+        [
+          30.2609047,
+          59.9107547
+        ],
+        [
+          30.2619127,
+          59.912359
+        ],
+        [
+          30.2622007,
+          59.9136743
+        ],
+        [
+          30.2621519,
+          59.9158408
+        ],
+        [
+          30.2620661,
+          59.9164361
+        ],
+        [
+          30.261523,
+          59.9169571
+        ],
+        [
+          30.2604927,
+          59.9172603
         ],
         [
           30.1935628,
