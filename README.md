@@ -1,5 +1,10 @@
 # Streets of Saint Petersburg
 
+> **Disclaimer:** This is a vibe-coded project created exclusively to support
+> its creator's personal project. It is not intended for use by other people,
+> and no guarantees are made about its accuracy, reliability, or suitability
+> for any other purpose.
+
 `streets_left.py` compares all GPX recordings in `tracks/` with current named
 streets from OpenStreetMap. It produces:
 
