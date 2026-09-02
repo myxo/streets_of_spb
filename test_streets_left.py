@@ -121,6 +121,14 @@ class StreetsLeftTests(unittest.TestCase):
                         {"lat": 59.96, "lon": 30.31},
                     ],
                 },
+                {
+                    "type": "way",
+                    "tags": {"name": "улица Айвазовского", "highway": "residential"},
+                    "geometry": [
+                        {"lat": 59.97, "lon": 30.30},
+                        {"lat": 59.97, "lon": 30.31},
+                    ],
+                },
             ]
         }
         segments = list(app.osm_segments(osm, app.rectangular_area(bbox)))

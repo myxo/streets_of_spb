@@ -45,6 +45,7 @@ EXCLUDED_HIGHWAYS = {
     "platform",
 }
 EXCLUDED_NAME_PARTS = ("проезд", "переулок")
+EXCLUDED_NAMES = {"улица айвазовского"}
 
 
 LatLon = tuple[float, float]
@@ -426,7 +427,10 @@ def osm_segments(data: dict, area: Area) -> Iterator[StreetSegment]:
         name = " ".join(str(tags.get("name", "")).split())
         highway = str(tags.get("highway", ""))
         access = str(tags.get("access", ""))
-        excluded_name = any(part in name.casefold() for part in EXCLUDED_NAME_PARTS)
+        normalized_name = name.casefold()
+        excluded_name = normalized_name in EXCLUDED_NAMES or any(
+            part in normalized_name for part in EXCLUDED_NAME_PARTS
+        )
         if (
             not name
             or excluded_name

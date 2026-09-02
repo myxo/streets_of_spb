@@ -60,8 +60,9 @@ The program samples every named, publicly accessible OSM road and checks whether
 a GPX line passes within 25 metres. It deliberately ignores motorways, private
 roads, construction, and unnamed paths. A street is considered complete at 30%
 coverage; these defaults accommodate ordinary phone GPS error and gaps at
-intersections. Names containing `проезд` or `переулок` are excluded from the
-analysis, map, reports, and statistics.
+intersections. Names containing `проезд` or `переулок`, along with the exact
+name `улица Айвазовского`, are excluded from the analysis, map, reports, and
+statistics.
 
 Useful adjustments:
 
