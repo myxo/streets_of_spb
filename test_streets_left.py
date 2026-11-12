@@ -132,15 +132,22 @@ class StreetsLeftTests(unittest.TestCase):
             ]
         }
         segments = list(app.osm_segments(osm, app.rectangular_area(bbox)))
-        self.assertEqual(len(segments), 1)
+        self.assertEqual({segment.name for segment in segments}, {
+            "Тестовая улица", "Тестовый переулок"
+        })
 
         projection = app.Projection(59.95, 30.30)
         tracks = [[(59.93, 30.30), (59.93, 30.31)]]
         index = app.build_track_index(tracks, projection, 25, 1000)
         results, features = app.analyze(segments, projection, index, 12, 25, 0.30)
-        self.assertEqual(results[0].name, "Тестовая улица")
-        self.assertAlmostEqual(results[0].completion, 1.0)
-        self.assertEqual(features[0]["properties"]["status"], "walked")
+        by_name = {result.name: result for result in results}
+        self.assertAlmostEqual(by_name["Тестовая улица"].completion, 1.0)
+        self.assertEqual(by_name["Тестовый переулок"].completion, 0.0)
+        self.assertEqual(
+            {feature["properties"]["status"] for feature in features
+             if feature["properties"]["name"] == "Тестовый переулок"},
+            {"remaining_incomplete"},
+        )
 
     def test_map_colors_unwalked_parts_by_whole_street_threshold(self):
         projection = app.Projection(59.93, 30.30)

@@ -44,7 +44,7 @@ EXCLUDED_HIGHWAYS = {
     "raceway",
     "platform",
 }
-EXCLUDED_NAME_PARTS = ("проезд", "переулок")
+EXCLUDED_NAME_PARTS = ("проезд",)
 EXCLUDED_NAMES = {"улица айвазовского"}
 
 
