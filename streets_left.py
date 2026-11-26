@@ -756,7 +756,7 @@ def write_map(
         active_days_value = str(statistics.active_days)
     else:
         duration_value = active_days_value = "—"
-    statistics_html = "<b>Track statistics</b>" + "".join(
+    statistics_html = "".join(
         f'<div class="stat-row"><span>{html.escape(label)}</span>'
         f'<span class="stat-value">{html.escape(value)}</span></div>'
         for label, value in (
@@ -796,7 +796,9 @@ def write_map(
     .map-button {{ background:white; border:0; border-radius:4px; padding:8px 12px;
       box-shadow:0 1px 5px #777; cursor:pointer; font:14px/1.2 system-ui,sans-serif; }}
     .map-button:hover {{ background:#f4f4f4; }}
-    .stats b {{ display:block; margin-bottom:4px; }}
+    .stats-control {{ display:flex; flex-direction:column; align-items:flex-start;
+      gap:6px; }}
+    .stats {{ min-width:190px; }}
     .stat-row {{ display:flex; justify-content:space-between; gap:16px;
       font-variant-numeric:tabular-nums; }}
     .stat-value {{ font-weight:600; }}
@@ -880,11 +882,24 @@ statisticsToggle.onAdd = () => {{
   return button;
 }};
 statisticsToggle.addTo(map);
-const trackStatistics = L.control({{position:'bottomleft'}});
+const trackStatistics = L.control({{position:'topright'}});
 trackStatistics.onAdd = () => {{
-  const div = L.DomUtil.create('div', 'summary stats');
-  div.innerHTML = {statistics_script};
-  return div;
+  const container = L.DomUtil.create('div', 'stats-control');
+  const button = L.DomUtil.create('button', 'map-button', container);
+  button.type = 'button';
+  button.textContent = 'Track statistics ▾';
+  button.setAttribute('aria-expanded', 'false');
+  const body = L.DomUtil.create('div', 'summary stats', container);
+  body.hidden = true;
+  body.innerHTML = {statistics_script};
+  L.DomEvent.disableClickPropagation(container);
+  L.DomEvent.disableScrollPropagation(container);
+  L.DomEvent.on(button, 'click', () => {{
+    body.hidden = !body.hidden;
+    button.setAttribute('aria-expanded', String(!body.hidden));
+    button.textContent = body.hidden ? 'Track statistics ▾' : 'Track statistics ▴';
+  }});
+  return container;
 }};
 trackStatistics.addTo(map);
 </script>

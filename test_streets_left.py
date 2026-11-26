@@ -363,6 +363,12 @@ class StreetsLeftTests(unittest.TestCase):
             self.assertIn("Total distance", map_html)
             self.assertIn("1 h 00 min", map_html)
             self.assertIn("trackStatistics.addTo(map)", map_html)
+            self.assertIn(
+                "const trackStatistics = L.control({position:'topright'});",
+                map_html,
+            )
+            self.assertIn("body.hidden = true", map_html)
+            self.assertIn("String(!body.hidden)", map_html)
 
 
 if __name__ == "__main__":
