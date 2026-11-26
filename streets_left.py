@@ -21,6 +21,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
@@ -46,6 +47,10 @@ EXCLUDED_HIGHWAYS = {
 }
 EXCLUDED_NAME_PARTS = ("проезд",)
 EXCLUDED_NAMES = {"улица айвазовского"}
+
+# GPX timestamps are UTC, but a walk belongs to the local calendar day. Saint
+# Petersburg is UTC+3 all year, so an evening recording is not split at 03:00.
+ACTIVE_DAY_TIMEZONE = timezone(timedelta(hours=3))
 
 
 LatLon = tuple[float, float]
@@ -84,6 +89,35 @@ class StreetSegment:
     highway: str
     start: LatLon
     end: LatLon
+
+
+@dataclass
+class Track:
+    """One GPX track or route, with a timestamp for every point if present.
+
+    It behaves like a sequence of ``(lat, lon)`` points so the analysis and map
+    code can keep treating tracks as plain coordinate lists.
+    """
+
+    points: list[LatLon]
+    times: list[datetime | None]
+
+    def __len__(self) -> int:
+        return len(self.points)
+
+    def __getitem__(self, index: int) -> LatLon:
+        return self.points[index]
+
+    def __iter__(self) -> Iterator[LatLon]:
+        return iter(self.points)
+
+
+@dataclass(frozen=True)
+class TrackStatistics:
+    distance_m: float = 0.0
+    duration: timedelta = timedelta()
+    active_days: int = 0
+    has_timestamps: bool = False
 
 
 @dataclass(frozen=True)
@@ -234,38 +268,68 @@ def local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
-def read_gpx(path: Path) -> list[list[LatLon]]:
-    """Read tracks and routes, without relying on a particular GPX namespace."""
+def parse_timestamp(value: str) -> datetime | None:
+    """Parse a GPX time value, accepting the ``Z`` suffix used by most apps."""
+    text = value.strip()
+    if not text:
+        return None
+    if text[-1] in {"Z", "z"}:
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def element_timestamp(element: ET.Element) -> datetime | None:
+    for child in element:
+        if local_name(child.tag) == "time" and child.text:
+            return parse_timestamp(child.text)
+    return None
+
+
+def read_gpx_tracks(path: Path) -> list[Track]:
+    """Read tracks and routes, keeping timestamps when the file provides them."""
     root = ET.parse(path).getroot()
-    lines: list[list[LatLon]] = []
+    tracks: list[Track] = []
     for element in root.iter():
         if local_name(element.tag) not in {"trkseg", "rte"}:
             continue
-        line: list[LatLon] = []
+        points: list[LatLon] = []
+        times: list[datetime | None] = []
         for child in element.iter():
             if local_name(child.tag) not in {"trkpt", "rtept"}:
                 continue
             try:
-                line.append((float(child.attrib["lat"]), float(child.attrib["lon"])))
+                points.append((float(child.attrib["lat"]), float(child.attrib["lon"])))
             except (KeyError, ValueError):
                 continue
-        if line:
-            lines.append(line)
-    return lines
+            times.append(element_timestamp(child))
+        if points:
+            tracks.append(Track(points, times))
+    return tracks
 
 
-def load_tracks(directory: Path) -> tuple[list[list[LatLon]], list[str]]:
-    lines: list[list[LatLon]] = []
+def read_gpx(path: Path) -> list[list[LatLon]]:
+    """Read tracks and routes, without relying on a particular GPX namespace."""
+    return [track.points for track in read_gpx_tracks(path)]
+
+
+def load_tracks(directory: Path) -> tuple[list[Track], list[str]]:
+    tracks: list[Track] = []
     warnings: list[str] = []
     for path in sorted(directory.glob("*.gpx")):
         try:
-            file_lines = read_gpx(path)
-            if not file_lines:
+            file_tracks = read_gpx_tracks(path)
+            if not file_tracks:
                 warnings.append(f"{path}: contains no track or route points")
-            lines.extend(file_lines)
+            tracks.extend(file_tracks)
         except (ET.ParseError, OSError) as error:
             warnings.append(f"{path}: {error}")
-    return lines, warnings
+    return tracks, warnings
 
 
 def build_track_index(
@@ -282,6 +346,50 @@ def build_track_index(
             if distance(start, end) <= max_gap_m:
                 index.add(start, end, tolerance_m)
     return index
+
+
+def track_statistics(
+    tracks: Iterable[Track],
+    projection: Projection,
+    max_gap_m: float,
+) -> TrackStatistics:
+    """Summarise all recordings: distance, elapsed time, and active days."""
+    distance_m = 0.0
+    duration = timedelta()
+    active_dates: set[date] = set()
+    has_timestamps = False
+    for track in tracks:
+        projected = [projection.xy(point) for point in track.points]
+        for start, end in zip(projected, projected[1:]):
+            step_m = distance(start, end)
+            # GPS being switched off and on must not add imaginary distance.
+            if step_m <= max_gap_m:
+                distance_m += step_m
+        timestamps = [value for value in track.times if value is not None]
+        if not timestamps:
+            continue
+        has_timestamps = True
+        elapsed = max(timestamps) - min(timestamps)
+        if elapsed > timedelta():
+            duration += elapsed
+        active_dates.update(
+            value.astimezone(ACTIVE_DAY_TIMEZONE).date() for value in timestamps
+        )
+    return TrackStatistics(distance_m, duration, len(active_dates), has_timestamps)
+
+
+def format_distance(metres: float) -> str:
+    if metres < 1000:
+        return f"{metres:.0f} m"
+    return f"{metres / 1000:,.1f} km".replace(",", " ")
+
+
+def format_duration(value: timedelta) -> str:
+    minutes = int(value.total_seconds() // 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours} h {minutes:02d} min"
+    return f"{minutes} min"
 
 
 def parse_bbox(value: str) -> tuple[float, float, float, float]:
@@ -635,6 +743,7 @@ def write_map(
     results: Sequence[StreetResult],
     complete_at: float,
     area_geojson: dict,
+    statistics: TrackStatistics,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     track_coordinates = [
@@ -642,6 +751,21 @@ def write_map(
         for line in tracks
         if len(line) >= 2
     ]
+    if statistics.has_timestamps:
+        duration_value = format_duration(statistics.duration)
+        active_days_value = str(statistics.active_days)
+    else:
+        duration_value = active_days_value = "—"
+    statistics_html = "<b>Track statistics</b>" + "".join(
+        f'<div class="stat-row"><span>{html.escape(label)}</span>'
+        f'<span class="stat-value">{html.escape(value)}</span></div>'
+        for label, value in (
+            ("Total distance", format_distance(statistics.distance_m)),
+            ("Total time", duration_value),
+            ("Active days", active_days_value),
+        )
+    )
+    statistics_script = json.dumps(statistics_html)
     map_data = json.dumps(
         {"type": "FeatureCollection", "features": features},
         ensure_ascii=False,
@@ -672,6 +796,10 @@ def write_map(
     .map-button {{ background:white; border:0; border-radius:4px; padding:8px 12px;
       box-shadow:0 1px 5px #777; cursor:pointer; font:14px/1.2 system-ui,sans-serif; }}
     .map-button:hover {{ background:#f4f4f4; }}
+    .stats b {{ display:block; margin-bottom:4px; }}
+    .stat-row {{ display:flex; justify-content:space-between; gap:16px;
+      font-variant-numeric:tabular-nums; }}
+    .stat-value {{ font-weight:600; }}
   </style>
 </head>
 <body>
@@ -752,6 +880,13 @@ statisticsToggle.onAdd = () => {{
   return button;
 }};
 statisticsToggle.addTo(map);
+const trackStatistics = L.control({{position:'bottomleft'}});
+trackStatistics.onAdd = () => {{
+  const div = L.DomUtil.create('div', 'summary stats');
+  div.innerHTML = {statistics_script};
+  return div;
+}};
+trackStatistics.addTo(map);
 </script>
 </body>
 </html>
@@ -843,6 +978,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Loaded {len(tracks)} track segments from {args.tracks}")
     index = build_track_index(tracks, projection, args.tolerance, args.max_gps_gap)
     print(f"Indexed {index.segment_count:,} GPS segments")
+    statistics = track_statistics(tracks, projection, args.max_gps_gap)
 
     try:
         if args.osm_file:
@@ -872,7 +1008,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     write_geojson(args.output / "coverage.geojson", features)
     write_map(
         args.output / "map.html", features, tracks, projection, bbox, results, threshold,
-        area.geojson,
+        area.geojson, statistics,
     )
 
     total_length = sum(result.total_m for result in results)
@@ -883,6 +1019,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if total_length:
         print(f"Estimated network coverage: {walked_length / total_length * 100:.1f}%")
+    statistics_line = f"Track statistics: {format_distance(statistics.distance_m)}"
+    if statistics.has_timestamps:
+        statistics_line += (
+            f", {format_duration(statistics.duration)}"
+            f", {statistics.active_days} active days"
+        )
+    print(statistics_line)
     print(f"Report: {args.output / 'streets.csv'}")
     print(f"Left:   {args.output / 'streets_left.csv'}")
     print(f"Map:    {args.output / 'map.html'}")

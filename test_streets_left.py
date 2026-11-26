@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 import urllib.error
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -56,6 +57,78 @@ class StreetsLeftTests(unittest.TestCase):
             self.assertEqual(
                 app.read_gpx(path), [[(59.93, 30.30), (59.94, 30.31)]]
             )
+
+    def test_gpx_parser_keeps_timestamps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "walk.gpx"
+            path.write_text(
+                """<gpx xmlns="http://www.topografix.com/GPX/1/1">
+                <trk><trkseg>
+                  <trkpt lat="59.93" lon="30.30">
+                    <time>2026-04-11T20:00:00Z</time>
+                  </trkpt>
+                  <trkpt lat="59.94" lon="30.31">
+                    <time>2026-04-11T20:30:00.000Z</time>
+                  </trkpt>
+                </trkseg></trk></gpx>""",
+                encoding="utf-8",
+            )
+            tracks = app.read_gpx_tracks(path)
+            self.assertEqual(len(tracks), 1)
+            self.assertEqual(
+                tracks[0].points, [(59.93, 30.30), (59.94, 30.31)]
+            )
+            self.assertEqual(
+                tracks[0].times,
+                [
+                    datetime(2026, 4, 11, 20, 0, tzinfo=timezone.utc),
+                    datetime(2026, 4, 11, 20, 30, tzinfo=timezone.utc),
+                ],
+            )
+
+    def test_track_statistics_sum_distance_time_and_active_days(self):
+        projection = app.Projection(59.935, 30.305)
+        first = app.Track(
+            [(59.93, 30.30), (59.93, 30.31)],
+            [
+                datetime(2026, 4, 11, 12, 0, tzinfo=timezone.utc),
+                datetime(2026, 4, 11, 13, 0, tzinfo=timezone.utc),
+            ],
+        )
+        second = app.Track(
+            [(59.94, 30.30), (59.94, 30.31)],
+            [
+                datetime(2026, 4, 12, 12, 0, tzinfo=timezone.utc),
+                datetime(2026, 4, 12, 12, 30, tzinfo=timezone.utc),
+            ],
+        )
+        statistics = app.track_statistics([first, second], projection, 1000)
+        self.assertAlmostEqual(statistics.distance_m, 1116, delta=25)
+        self.assertEqual(statistics.duration, timedelta(hours=1, minutes=30))
+        self.assertEqual(statistics.active_days, 2)
+        self.assertTrue(statistics.has_timestamps)
+
+    def test_track_statistics_ignore_gps_gaps_and_missing_times(self):
+        projection = app.Projection(59.93, 30.30)
+        track = app.Track([(59.93, 30.30), (59.94, 30.31)], [None, None])
+        statistics = app.track_statistics([track], projection, 250)
+        self.assertEqual(statistics.distance_m, 0)
+        self.assertEqual(statistics.duration, timedelta())
+        self.assertEqual(statistics.active_days, 0)
+        self.assertFalse(statistics.has_timestamps)
+
+    def test_active_days_use_local_calendar_dates(self):
+        projection = app.Projection(59.93, 30.30)
+        track = app.Track(
+            [(59.93, 30.30), (59.93, 30.301)],
+            [
+                datetime(2026, 4, 11, 22, 0, tzinfo=timezone.utc),
+                datetime(2026, 4, 12, 1, 0, tzinfo=timezone.utc),
+            ],
+        )
+        statistics = app.track_statistics([track], projection, 250)
+        # UTC would count two dates; both are 12 April in Saint Petersburg.
+        self.assertEqual(statistics.active_days, 1)
 
     def test_spatial_index_uses_distance_to_line(self):
         index = app.SegmentIndex(25)
@@ -231,8 +304,12 @@ class StreetsLeftTests(unittest.TestCase):
             tracks.mkdir()
             (tracks / "walk.gpx").write_text(
                 """<gpx><trk><trkseg>
-                <trkpt lat="59.9300" lon="30.3000"/>
-                <trkpt lat="59.9300" lon="30.3010"/>
+                <trkpt lat="59.9300" lon="30.3000">
+                  <time>2026-04-11T20:00:00Z</time>
+                </trkpt>
+                <trkpt lat="59.9300" lon="30.3010">
+                  <time>2026-04-11T21:00:00Z</time>
+                </trkpt>
                 </trkseg></trk></gpx>""",
                 encoding="utf-8",
             )
@@ -282,6 +359,10 @@ class StreetsLeftTests(unittest.TestCase):
             self.assertIn("tracksLayer.addTo(map)", map_html)
             self.assertIn("map.createPane('tracksPane')", map_html)
             self.assertIn("color:'#0066ff', weight:5, opacity:1", map_html)
+            self.assertIn("Track statistics", map_html)
+            self.assertIn("Total distance", map_html)
+            self.assertIn("1 h 00 min", map_html)
+            self.assertIn("trackStatistics.addTo(map)", map_html)
 
 
 if __name__ == "__main__":

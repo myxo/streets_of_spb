@@ -13,6 +13,10 @@
     .map-button { background:white; border:0; border-radius:4px; padding:8px 12px;
       box-shadow:0 1px 5px #777; cursor:pointer; font:14px/1.2 system-ui,sans-serif; }
     .map-button:hover { background:#f4f4f4; }
+    .stats b { display:block; margin-bottom:4px; }
+    .stat-row { display:flex; justify-content:space-between; gap:16px;
+      font-variant-numeric:tabular-nums; }
+    .stat-value { font-weight:600; }
   </style>
 </head>
 <body>
@@ -93,6 +97,13 @@ statisticsToggle.onAdd = () => {
   return button;
 };
 statisticsToggle.addTo(map);
+const trackStatistics = L.control({position:'bottomleft'});
+trackStatistics.onAdd = () => {
+  const div = L.DomUtil.create('div', 'summary stats');
+  div.innerHTML = "<b>Track statistics</b><div class=\"stat-row\"><span>Total distance</span><span class=\"stat-value\">691.8 km</span></div><div class=\"stat-row\"><span>Total time</span><span class=\"stat-value\">128 h 57 min</span></div><div class=\"stat-row\"><span>Active days</span><span class=\"stat-value\">77</span></div>";
+  return div;
+};
+trackStatistics.addTo(map);
 </script>
 </body>
 </html>

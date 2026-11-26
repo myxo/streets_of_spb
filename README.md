@@ -88,6 +88,14 @@ not passed the threshold. The map shows either statistics or tracks, never both:
 use **Show tracks** and **Show statistics** to switch views. GPS tracks are drawn
 as opaque bright-blue lines with a white outline for visibility.
 
+A panel in the bottom-left corner is always visible and summarises all GPX files
+in `tracks/`, including parts outside the project boundary: total distance,
+total elapsed recording time (the sum of each track segment's first-to-last
+timestamp), and active days (distinct local calendar dates with recordings).
+Distance skips jumps longer than `--max-gps-gap`, so switching GPS off and on
+does not inflate it. Files without timestamps contribute distance but not time
+or active days.
+
 ## Publish the map with GitHub Pages
 
 The generated `output/map.html` is committed to the repository and deployed as
